@@ -8,7 +8,9 @@
 
 -export([now_ms/0, update_record/2]).
 
-now_ms() -> 0.
+now_ms() ->
+    {A, B, C} = os:timestamp(),
+    A * 1000000000 + B * 1000 + C div 1000.
 
 update_record(Record, []) -> Record;
 update_record(Record, [{Index, Value} | Rest]) ->
