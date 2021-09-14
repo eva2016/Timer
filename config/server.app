@@ -7,6 +7,6 @@
         {registered, [server_sup]},
         {applications, [kernel, stdlib, sasl]},
         {mod, {server, []}},
-        {start_phase, []}
+        {start_phases, []}
     ]    
 }.
