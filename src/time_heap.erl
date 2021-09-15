@@ -9,7 +9,7 @@
 -include("time_heap.hrl").
 
 -export([init_time_heap/1, init_time_heap/2, add_timer/2, del_timer/2, tick/1]).
--export([new_timer/3]).
+-export([top/1, new_timer/3]).
 
 %% 初始化时间堆
 %% @return: ok
@@ -67,13 +67,16 @@ add_timer(HeapName, Timer) ->
     case dict:find(Ref, RefDict) of
         error ->
             Hole = array:size(Array),
-            NewArray = array:set(Hole, Timer, TimeHeap),
+            NewArray = array:set(Hole, Timer, Array),
             NewRefDict = dict:store(Timer#heap_timer.ref, Hole, RefDict),
             {Index, NewArray1, NewRefDict1} = do_shift_up(Hole, Timer, NewArray, NewRefDict),
             ItemList = [{#time_heap.array, NewArray1}, {#time_heap.ref_idxs, NewRefDict1}],
             case Index =:= 0 of
                 true ->         %% 更换堆顶
-                    erlang:cancel_timer(TimerRef),
+                    case TimerRef =/= none of
+                        true -> erlang:cancel_timer(TimerRef);
+                        _ -> ok
+                    end,
                     NewTimerRef = active_top_timer(HeapName, ExpireTime),
                     ItemList1 = [{#time_heap.timer_ref, NewTimerRef} | ItemList];
                 _ ->
@@ -83,7 +86,7 @@ add_timer(HeapName, Timer) ->
             erlang:put(HeapName, NewTimeHeap),
             ok;
         {ok, Index} ->
-            io_lib:format("add_timer error: ref exist ~p", [{HeapName, Ref, Index}]),
+            io:format("add_timer error: ref exist ~p", [{HeapName, Ref, Index}]),
             fail
     end.
 
@@ -99,7 +102,7 @@ del_timer(HeapName, Ref) ->
         error -> ok;
         {ok, Index} ->
             Timer = array:get(Index, Array),
-            NewArray = array:set(Index, Array, Timer#heap_timer{cb_func = none}),
+            NewArray = array:set(Index, Timer#heap_timer{cb_func = none}, Array),
             NewTimeHeap = TimeHeap#time_heap{array = NewArray},
             erlang:put(HeapName, NewTimeHeap)
     end.
@@ -119,7 +122,7 @@ tick(HeapName) ->
             ItemList = [{#time_heap.array, NewArray}, {#time_heap.ref_idxs, NewRefDict}],
             case top(NewArray) of
                 none ->
-                    ItemList1 = ItemList;
+                    ItemList1 = [{#time_heap.timer_ref, none} | ItemList];
                 #heap_timer{expire = ExpireTime} ->
                     TimerRef = active_top_timer(HeapName, ExpireTime),
                     ItemList1 = [{#time_heap.timer_ref, TimerRef} | ItemList]
@@ -181,7 +184,7 @@ top(Array) ->
 %% 删除堆顶的定时器
 %% @return: {Array, RefDict}
 do_pop_timer(TopRef, Array, RefDict) ->
-    CurSize = array:size(),
+    CurSize = array:size(Array),
     case CurSize of
         0 ->
             {Array, RefDict};
@@ -229,7 +232,7 @@ do_shift_down(Hole, Timer, CurSize, Array, RefDict) when (Hole*2+1) =< (CurSize-
             true ->
                 RightChild = LeftChild+1,
                 RightTimer = array:get(RightChild, Array),
-                case LeftTimer#heap_timer.expire < RightChild#heap_timer.expire of
+                case LeftTimer#heap_timer.expire < RightTimer#heap_timer.expire of
                     true -> {LeftChild, LeftTimer};
                     _ -> {RightChild, RightTimer}
                 end;
@@ -250,6 +253,7 @@ do_shift_down(Hole, Timer, _CurSize, Array, RefDict) ->
     NewRefDict = dict:store(Timer#heap_timer.ref, Hole, RefDict),
     {NewArray, NewRefDict}.
 
+%% @params: FuncTuple = {Mod, Func, Args}
 %% @return: #heap_timer{}
 new_timer(ExpireTime, FuncTuple, LoopInterval) ->
     #heap_timer{
